@@ -12,6 +12,8 @@ import numpy as np
 MINOVERLAP = 0.5 # default value (defined in the PASCAL VOC2012 challenge)
 
 parser = argparse.ArgumentParser()
+parser.add_argument('-gt', '--ground-truth', required=True, help="dir to ground truth annotations")
+parser.add_argument('-r', '--results', required=True, help="dir to resulting annotations")
 parser.add_argument('-na', '--no-animation', help="no animation is shown.", action="store_true")
 parser.add_argument('-np', '--no-plot', help="no plot is shown.", action="store_true")
 parser.add_argument('-q', '--quiet', help="minimalistic console output.", action="store_true")
@@ -44,8 +46,10 @@ if args.set_class_iou is not None:
 # make sure that the cwd() is the location of the python script (so that every path makes sense)
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-GT_PATH = os.path.join(os.getcwd(), 'input', 'ground-truth')
-DR_PATH = os.path.join(os.getcwd(), 'input', 'detection-results')
+#GT_PATH = os.path.join(os.getcwd(), 'input', 'ground-truth')
+#DR_PATH = os.path.join(os.getcwd(), 'input', 'detection-results')
+GT_PATH = os.path.join(args.ground_truth)
+DR_PATH = os.path.join(args.results)
 # if there are no images then no animation can be shown
 IMG_PATH = os.path.join(os.getcwd(), 'input', 'images-optional')
 if os.path.exists(IMG_PATH): 
@@ -379,10 +383,12 @@ for txt_file in ground_truth_files_list:
     for line in lines_list:
         try:
             if "difficult" in line:
-                    class_name, left, top, right, bottom, _difficult = line.split()
+                    #class_name, left, top, right, bottom, _difficult = line.split()
+                    class_name, confidence, left, top, right, bottom, _difficult = line.split()
                     is_difficult = True
             else:
-                    class_name, left, top, right, bottom = line.split()
+                    #class_name, left, top, right, bottom = line.split()
+                    class_name, confidence, left, top, right, bottom = line.split()
         except ValueError:
             error_msg = "Error: File " + txt_file + " in the wrong format.\n"
             error_msg += " Expected: <class_name> <left> <top> <right> <bottom> ['difficult']\n"
