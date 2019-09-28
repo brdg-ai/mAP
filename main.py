@@ -1,3 +1,5 @@
+import jsonlines
+import numpy as np
 import glob
 import json
 import os
@@ -46,10 +48,9 @@ if args.set_class_iou is not None:
 # make sure that the cwd() is the location of the python script (so that every path makes sense)
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-#GT_PATH = os.path.join(os.getcwd(), 'input', 'ground-truth')
-#DR_PATH = os.path.join(os.getcwd(), 'input', 'detection-results')
 GT_PATH = os.path.join(args.ground_truth)
 DR_PATH = os.path.join(args.results)
+
 # if there are no images then no animation can be shown
 IMG_PATH = os.path.join(os.getcwd(), 'input', 'images-optional')
 if os.path.exists(IMG_PATH): 
@@ -356,74 +357,49 @@ if show_animation:
      Load each of the ground-truth files into a temporary ".json" file.
      Create a list of all the class names present in the ground-truth (gt_classes).
 """
-# get a list with the ground-truth files
-ground_truth_files_list = glob.glob(GT_PATH + '/*.txt')
-if len(ground_truth_files_list) == 0:
-    error("Error: No ground-truth files found!")
-ground_truth_files_list.sort()
 # dictionary with counter per class
 gt_counter_per_class = {}
 counter_images_per_class = {}
 
-for txt_file in ground_truth_files_list:
-    #print(txt_file)
-    file_id = txt_file.split(".txt", 1)[0]
-    file_id = os.path.basename(os.path.normpath(file_id))
-    # check if there is a correspondent detection-results file
-    temp_path = os.path.join(DR_PATH, (file_id + ".txt"))
-    if not os.path.exists(temp_path):
-        error_msg = "Error. File not found: {}\n".format(temp_path)
-        error_msg += "(You can avoid this error message by running extra/intersect-gt-and-dr.py)"
-        error(error_msg)
-    lines_list = file_lines_to_list(txt_file)
-    # create ground-truth dictionary
-    bounding_boxes = []
-    is_difficult = False
-    already_seen_classes = []
-    for line in lines_list:
-        try:
-            if "difficult" in line:
-                    #class_name, left, top, right, bottom, _difficult = line.split()
-                    class_name, confidence, left, top, right, bottom, _difficult = line.split()
-                    is_difficult = True
+with jsonlines.open(GT_PATH) as reader:
+    for obj in reader:
+        bounding_boxes = []
+        already_seen_classes = []
+
+        # create ground-truth dictionary
+                        #class_name, left, top, right, bottom = line.split()
+        frame_no = obj["frame_no"]
+        boxes = obj["boxes"]
+        for box in boxes:
+            class_name = box["class"]
+            confidence = box["conf"]
+            left = str(box["x1"])
+            right = str(box["x2"])
+            top = str(box["y1"])
+            bottom = str(box["y2"])
+            if class_name in args.ignore:
+                continue
+            bbox = left + " " + top + " " + right + " " +bottom
+            bounding_boxes.append({"class_name":class_name, "bbox":bbox, "used":False})
+            # count that object
+            if class_name in gt_counter_per_class:
+                gt_counter_per_class[class_name] += 1
             else:
-                    #class_name, left, top, right, bottom = line.split()
-                    class_name, confidence, left, top, right, bottom = line.split()
-        except ValueError:
-            error_msg = "Error: File " + txt_file + " in the wrong format.\n"
-            error_msg += " Expected: <class_name> <left> <top> <right> <bottom> ['difficult']\n"
-            error_msg += " Received: " + line
-            error_msg += "\n\nIf you have a <class_name> with spaces between words you should remove them\n"
-            error_msg += "by running the script \"remove_space.py\" or \"rename_class.py\" in the \"extra/\" folder."
-            error(error_msg)
-        # check if class is in the ignore list, if yes skip
-        if class_name in args.ignore:
-            continue
-        bbox = left + " " + top + " " + right + " " +bottom
-        if is_difficult:
-                bounding_boxes.append({"class_name":class_name, "bbox":bbox, "used":False, "difficult":True})
-                is_difficult = False
-        else:
-                bounding_boxes.append({"class_name":class_name, "bbox":bbox, "used":False})
-                # count that object
-                if class_name in gt_counter_per_class:
-                    gt_counter_per_class[class_name] += 1
+                # if class didn't exist yet
+                gt_counter_per_class[class_name] = 1
+
+            if class_name not in already_seen_classes:
+                if class_name in counter_images_per_class:
+                    counter_images_per_class[class_name] += 1
                 else:
                     # if class didn't exist yet
-                    gt_counter_per_class[class_name] = 1
+                    counter_images_per_class[class_name] = 1
+                already_seen_classes.append(class_name)
 
-                if class_name not in already_seen_classes:
-                    if class_name in counter_images_per_class:
-                        counter_images_per_class[class_name] += 1
-                    else:
-                        # if class didn't exist yet
-                        counter_images_per_class[class_name] = 1
-                    already_seen_classes.append(class_name)
-
-
-    # dump bounding_boxes into a ".json" file
-    with open(TEMP_FILES_PATH + "/" + file_id + "_ground_truth.json", 'w') as outfile:
-        json.dump(bounding_boxes, outfile)
+        file_id = f"{frame_no}"
+        # dump bounding_boxes into a ".json" file
+        with open(TEMP_FILES_PATH + "/" + file_id + "_ground_truth.json", 'w') as outfile:
+            json.dump(bounding_boxes, outfile)
 
 gt_classes = list(gt_counter_per_class.keys())
 # let's sort the classes alphabetically
@@ -461,36 +437,24 @@ if specific_iou_flagged:
      Load each of the detection-results files into a temporary ".json" file.
 """
 # get a list with the detection-results files
-dr_files_list = glob.glob(DR_PATH + '/*.txt')
-dr_files_list.sort()
 
 for class_index, class_name in enumerate(gt_classes):
     bounding_boxes = []
-    for txt_file in dr_files_list:
-        #print(txt_file)
-        # the first time it checks if all the corresponding ground-truth files exist
-        file_id = txt_file.split(".txt",1)[0]
-        file_id = os.path.basename(os.path.normpath(file_id))
-        temp_path = os.path.join(GT_PATH, (file_id + ".txt"))
-        if class_index == 0:
-            if not os.path.exists(temp_path):
-                error_msg = "Error. File not found: {}\n".format(temp_path)
-                error_msg += "(You can avoid this error message by running extra/intersect-gt-and-dr.py)"
-                error(error_msg)
-        lines = file_lines_to_list(txt_file)
-        for line in lines:
-            try:
-                tmp_class_name, confidence, left, top, right, bottom = line.split()
-            except ValueError:
-                error_msg = "Error: File " + txt_file + " in the wrong format.\n"
-                error_msg += " Expected: <class_name> <confidence> <left> <top> <right> <bottom>\n"
-                error_msg += " Received: " + line
-                error(error_msg)
-            if tmp_class_name == class_name:
-                #print("match")
-                bbox = left + " " + top + " " + right + " " +bottom
-                bounding_boxes.append({"confidence":confidence, "file_id":file_id, "bbox":bbox})
-                #print(bounding_boxes)
+    with jsonlines.open(DR_PATH) as reader:
+        for obj in reader:
+            boxes = obj["boxes"]
+            frame_no = obj["frame_no"]
+            file_id = f"{frame_no}"
+            for box in boxes:
+                tmp_class_name = box["class"]
+                confidence = box["conf"]
+                left = str(box["x1"])
+                right = str(box["x2"])
+                top = str(box["y1"])
+                bottom = str(box["y2"])
+                if tmp_class_name == class_name:
+                    bbox = left + " " + top + " " + right + " " +bottom
+                    bounding_boxes.append({"confidence":confidence, "file_id":file_id, "bbox":bbox})
     # sort detection-results by decreasing confidence
     bounding_boxes.sort(key=lambda x:float(x['confidence']), reverse=True)
     with open(TEMP_FILES_PATH + "/" + class_name + "_dr.json", 'w') as outfile:
@@ -759,29 +723,6 @@ dr_classes = list(det_counter_per_class.keys())
 
 
 """
- Plot the total number of occurences of each class in the ground-truth
-"""
-if draw_plot:
-    window_title = "ground-truth-info"
-    plot_title = "ground-truth\n"
-    plot_title += "(" + str(len(ground_truth_files_list)) + " files and " + str(n_classes) + " classes)"
-    x_label = "Number of objects per class"
-    output_path = results_files_path + "/ground-truth-info.png"
-    to_show = False
-    plot_color = 'forestgreen'
-    draw_plot_func(
-        gt_counter_per_class,
-        n_classes,
-        window_title,
-        plot_title,
-        x_label,
-        output_path,
-        to_show,
-        plot_color,
-        '',
-        )
-
-"""
  Write number of ground-truth objects per class to results.txt
 """
 with open(results_files_path + "/results.txt", 'a') as results_file:
@@ -797,34 +738,6 @@ for class_name in dr_classes:
     if class_name not in gt_classes:
         count_true_positives[class_name] = 0
 #print(count_true_positives)
-
-"""
- Plot the total number of occurences of each class in the "detection-results" folder
-"""
-if draw_plot:
-    window_title = "detection-results-info"
-    # Plot title
-    plot_title = "detection-results\n"
-    plot_title += "(" + str(len(dr_files_list)) + " files and "
-    count_non_zero_values_in_dictionary = sum(int(x) > 0 for x in list(det_counter_per_class.values()))
-    plot_title += str(count_non_zero_values_in_dictionary) + " detected classes)"
-    # end Plot title
-    x_label = "Number of objects per class"
-    output_path = results_files_path + "/detection-results-info.png"
-    to_show = False
-    plot_color = 'forestgreen'
-    true_p_bar = count_true_positives
-    draw_plot_func(
-        det_counter_per_class,
-        len(det_counter_per_class),
-        window_title,
-        plot_title,
-        x_label,
-        output_path,
-        to_show,
-        plot_color,
-        true_p_bar
-        )
 
 """
  Write number of detected objects per class to results.txt
