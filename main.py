@@ -8,12 +8,14 @@ import operator
 import sys
 import argparse
 import math
+import tempfile
 
 import numpy as np
 
 MINOVERLAP = 0.5 # default value (defined in the PASCAL VOC2012 challenge)
 
 parser = argparse.ArgumentParser()
+parser.add_argument('-o', '--output-dir', required=False, default="/tmp", help="dir to output files")
 parser.add_argument('-gt', '--ground-truth', required=True, help="dir to ground truth annotations")
 parser.add_argument('-r', '--results', required=True, help="dir to resulting annotations")
 parser.add_argument('-na', '--no-animation', help="no animation is shown.", action="store_true")
@@ -338,10 +340,8 @@ def draw_plot_func(dictionary, n_classes, window_title, plot_title, x_label, out
 """
  Create a ".temp_files/" and "results/" directory
 """
-TEMP_FILES_PATH = ".temp_files"
-if not os.path.exists(TEMP_FILES_PATH): # if it doesn't exist already
-    os.makedirs(TEMP_FILES_PATH)
-results_files_path = "results"
+tempdir = tempfile.TemporaryDirectory(prefix="map")
+results_files_path = os.path.join(args.output_dir, "results")
 if os.path.exists(results_files_path): # if it exist already
     # reset the results directory
     shutil.rmtree(results_files_path)
@@ -367,7 +367,7 @@ with jsonlines.open(GT_PATH) as reader:
         already_seen_classes = []
 
         # create ground-truth dictionary
-                        #class_name, left, top, right, bottom = line.split()
+        #class_name, left, top, right, bottom = line.split()
         frame_no = obj["frame_no"]
         boxes = obj["boxes"]
         for box in boxes:
@@ -398,7 +398,7 @@ with jsonlines.open(GT_PATH) as reader:
 
         file_id = f"{frame_no}"
         # dump bounding_boxes into a ".json" file
-        with open(TEMP_FILES_PATH + "/" + file_id + "_ground_truth.json", 'w') as outfile:
+        with open(tempdir.name + "/" + file_id + "_ground_truth.json", 'w') as outfile:
             json.dump(bounding_boxes, outfile)
 
 gt_classes = list(gt_counter_per_class.keys())
@@ -457,7 +457,7 @@ for class_index, class_name in enumerate(gt_classes):
                     bounding_boxes.append({"confidence":confidence, "file_id":file_id, "bbox":bbox})
     # sort detection-results by decreasing confidence
     bounding_boxes.sort(key=lambda x:float(x['confidence']), reverse=True)
-    with open(TEMP_FILES_PATH + "/" + class_name + "_dr.json", 'w') as outfile:
+    with open(tempdir.name+ "/" + class_name + "_dr.json", 'w') as outfile:
         json.dump(bounding_boxes, outfile)
 
 """
@@ -475,7 +475,7 @@ with open(results_files_path + "/results.txt", 'w') as results_file:
         """
          Load detection-results of that class
         """
-        dr_file = TEMP_FILES_PATH + "/" + class_name + "_dr.json"
+        dr_file = tempdir.name + "/" + class_name + "_dr.json"
         dr_data = json.load(open(dr_file))
 
         """
@@ -510,7 +510,7 @@ with open(results_files_path + "/results.txt", 'w') as results_file:
                     img = cv2.copyMakeBorder(img, 0, bottom_border, 0, 0, cv2.BORDER_CONSTANT, value=BLACK)
             # assign detection-results to ground truth object if any
             # open ground-truth with that file_id
-            gt_file = TEMP_FILES_PATH + "/" + file_id + "_ground_truth.json"
+            gt_file = tempdir.name + "/" + file_id + "_ground_truth.json"
             ground_truth_data = json.load(open(gt_file))
             ovmax = -1
             gt_match = -1
@@ -697,27 +697,33 @@ with open(results_files_path + "/results.txt", 'w') as results_file:
     print(text)
 
 # remove the temp_files directory
-shutil.rmtree(TEMP_FILES_PATH)
+tempdir.cleanup()
 
 """
  Count total of detection-results
 """
 # iterate through all the files
 det_counter_per_class = {}
-for txt_file in dr_files_list:
-    # get lines to list
-    lines_list = file_lines_to_list(txt_file)
-    for line in lines_list:
-        class_name = line.split()[0]
-        # check if class is in the ignore list, if yes skip
-        if class_name in args.ignore:
-            continue
-        # count that object
-        if class_name in det_counter_per_class:
-            det_counter_per_class[class_name] += 1
-        else:
-            # if class didn't exist yet
-            det_counter_per_class[class_name] = 1
+with jsonlines.open(DR_PATH) as reader:
+    for obj in reader:
+        bounding_boxes = []
+        already_seen_classes = []
+
+        # create ground-truth dictionary
+        #class_name, left, top, right, bottom = line.split()
+        frame_no = obj["frame_no"]
+        boxes = obj["boxes"]
+        for box in boxes:
+            class_name = box["class"]
+            # check if class is in the ignore list, if yes skip
+            if class_name in args.ignore:
+                continue
+            # count that object
+            if class_name in det_counter_per_class:
+                det_counter_per_class[class_name] += 1
+            else:
+                # if class didn't exist yet
+                det_counter_per_class[class_name] = 1
 #print(det_counter_per_class)
 dr_classes = list(det_counter_per_class.keys())
 
