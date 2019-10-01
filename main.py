@@ -21,6 +21,7 @@ parser.add_argument('-r', '--results', required=True, help="dir to resulting ann
 parser.add_argument('-na', '--no-animation', help="no animation is shown.", action="store_true")
 parser.add_argument('-np', '--no-plot', help="no plot is shown.", action="store_true")
 parser.add_argument('-q', '--quiet', help="minimalistic console output.", action="store_true")
+parser.add_argument('-v', '--verbose', help="maximalistic console output.", action="store_true")
 # argparse receiving list of classes to be ignored
 parser.add_argument('-i', '--ignore', nargs='+', type=str, help="ignore a list of classes.")
 # argparse receiving list of classes with specific IoU (e.g., python main.py --set-class-iou person 0.7)
@@ -380,7 +381,7 @@ with jsonlines.open(GT_PATH) as reader:
             if class_name in args.ignore:
                 continue
             bbox = left + " " + top + " " + right + " " +bottom
-            bounding_boxes.append({"class_name":class_name, "bbox":bbox, "used":False})
+            bounding_boxes.append({"class_name":class_name, "bbox":bbox, "used":False, "confidence":confidence})
             # count that object
             if class_name in gt_counter_per_class:
                 gt_counter_per_class[class_name] += 1
@@ -544,6 +545,11 @@ with open(results_files_path + "/results.txt", 'w') as results_file:
             if ovmax >= min_overlap:
                 if "difficult" not in gt_match:
                         if not bool(gt_match["used"]):
+                            result_conf = detection["confidence"]
+                            gt_conf = gt_match["confidence"]
+                            if args.verbose:
+                                print(f"conf_diff {gt_conf} {result_conf} {gt_conf - result_conf}")
+
                             # true positive
                             tp[idx] = 1
                             gt_match["used"] = True
