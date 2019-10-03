@@ -19,7 +19,7 @@ parser.add_argument('-o', '--output-dir', required=False, default="/tmp", help="
 parser.add_argument('-gt', '--ground-truth', required=True, help="dir to ground truth annotations")
 parser.add_argument('-r', '--results', required=True, help="dir to resulting annotations")
 parser.add_argument('-na', '--no-animation', help="no animation is shown.", action="store_true")
-parser.add_argument('-np', '--no-plot', help="no plot is shown.", action="store_true")
+parser.add_argument('-p', '--plot', help="plot is shown.", action="store_true")
 parser.add_argument('-q', '--quiet', help="minimalistic console output.", action="store_true")
 parser.add_argument('-v', '--verbose', help="maximalistic console output.", action="store_true")
 # argparse receiving list of classes to be ignored
@@ -76,13 +76,13 @@ if not args.no_animation:
 
 # try to import Matplotlib if the user didn't choose the option --no-plot
 draw_plot = False
-if not args.no_plot:
+if args.plot:
     try:
         import matplotlib.pyplot as plt
         draw_plot = True
     except ImportError:
         print("\"matplotlib\" not found, please install it to get the resulting plots.")
-        args.no_plot = True
+        args.plot = False
 
 
 def log_average_miss_rate(precision, fp_cumsum, num_images):
