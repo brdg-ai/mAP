@@ -2,7 +2,6 @@ import argparse
 import collections
 import json
 import math
-import operator
 import os
 import shutil
 import sys
@@ -18,7 +17,7 @@ parser.add_argument('-o', '--output-dir', required=False, default="/tmp", help="
 parser.add_argument('-gt', '--ground-truth', required=True, help="dir to ground truth annotations")
 parser.add_argument('-r', '--results', required=True, help="dir to resulting annotations")
 parser.add_argument('-na', '--no-animation',  default=True, help="no animation is shown.", action="store_true")
-parser.add_argument('-p', '--plot', help="plot is shown.", action="store_true")
+parser.add_argument('-p', '--plot', default=False, help="plot is shown.", action="store_true")
 parser.add_argument('-q', '--quiet', help="minimalistic console output.", action="store_true")
 parser.add_argument('-v', '--verbose', help="maximalistic console output.", action="store_true")
 parser.add_argument('-i', '--ignore', nargs='+', type=str, help="ignore a list of classes.")
@@ -47,17 +46,6 @@ if args.set_class_iou is not None:
 
 GT_PATH = os.path.join(args.ground_truth)
 DR_PATH = os.path.join(args.results)
-
-# try to import Matplotlib if the user didn't choose the option --no-plot
-draw_plot = False
-if args.plot:
-    try:
-        import matplotlib.pyplot as plt
-        draw_plot = True
-    except ImportError:
-        print("\"matplotlib\" not found, please install it to get the resulting plots.")
-        args.plot = False
-
 
 def log_average_miss_rate(precision, fp_cumsum, num_images):
     """
@@ -176,115 +164,6 @@ def voc_ap(rec, prec):
 
 
 """
- Plot - adjust axes
-"""
-def adjust_axes(r, t, fig, axes):
-    # get text width for re-scaling
-    bb = t.get_window_extent(renderer=r)
-    text_width_inches = bb.width / fig.dpi
-    # get axis width in inches
-    current_fig_width = fig.get_figwidth()
-    new_fig_width = current_fig_width + text_width_inches
-    propotion = new_fig_width / current_fig_width
-    # get axis limit
-    x_lim = axes.get_xlim()
-    axes.set_xlim([x_lim[0], x_lim[1]*propotion])
-
-"""
- Draw plot using Matplotlib
-"""
-def draw_plot_func(dictionary, n_classes, window_title, plot_title, x_label, output_path, to_show, plot_color, true_p_bar):
-    # sort the dictionary by decreasing value, into a list of tuples
-    sorted_dic_by_value = sorted(dictionary.items(), key=operator.itemgetter(1))
-    # unpacking the list of tuples into two lists
-    sorted_keys, sorted_values = zip(*sorted_dic_by_value)
-    # 
-    if true_p_bar != "":
-        """
-         Special case to draw in:
-            - green -> TP: True Positives (object detected and matches ground-truth)
-            - red -> FP: False Positives (object detected but does not match ground-truth)
-            - orange -> FN: False Negatives (object not detected but present in the ground-truth)
-        """
-        fp_sorted = []
-        tp_sorted = []
-        for key in sorted_keys:
-            fp_sorted.append(dictionary[key] - true_p_bar[key])
-            tp_sorted.append(true_p_bar[key])
-        plt.barh(range(n_classes), fp_sorted, align='center', color='crimson', label='False Positive')
-        plt.barh(range(n_classes), tp_sorted, align='center', color='forestgreen', label='True Positive', left=fp_sorted)
-        # add legend
-        plt.legend(loc='lower right')
-        """
-         Write number on side of bar
-        """
-        fig = plt.gcf() # gcf - get current figure
-        axes = plt.gca()
-        r = fig.canvas.get_renderer()
-        for i, val in enumerate(sorted_values):
-            fp_val = fp_sorted[i]
-            tp_val = tp_sorted[i]
-            fp_str_val = " " + str(fp_val)
-            tp_str_val = fp_str_val + " " + str(tp_val)
-            # trick to paint multicolor with offset:
-            # first paint everything and then repaint the first number
-            t = plt.text(val, i, tp_str_val, color='forestgreen', va='center', fontweight='bold')
-            plt.text(val, i, fp_str_val, color='crimson', va='center', fontweight='bold')
-            if i == (len(sorted_values)-1): # largest bar
-                adjust_axes(r, t, fig, axes)
-    else:
-        plt.barh(range(n_classes), sorted_values, color=plot_color)
-        """
-         Write number on side of bar
-        """
-        fig = plt.gcf() # gcf - get current figure
-        axes = plt.gca()
-        r = fig.canvas.get_renderer()
-        for i, val in enumerate(sorted_values):
-            str_val = " " + str(val) # add a space before
-            if val < 1.0:
-                str_val = " {0:.2f}".format(val)
-            t = plt.text(val, i, str_val, color=plot_color, va='center', fontweight='bold')
-            # re-set axes to show number inside the figure
-            if i == (len(sorted_values)-1): # largest bar
-                adjust_axes(r, t, fig, axes)
-    # set window title
-    fig.canvas.set_window_title(window_title)
-    # write classes in y axis
-    tick_font_size = 12
-    plt.yticks(range(n_classes), sorted_keys, fontsize=tick_font_size)
-    """
-     Re-scale height accordingly
-    """
-    init_height = fig.get_figheight()
-    # comput the matrix height in points and inches
-    dpi = fig.dpi
-    height_pt = n_classes * (tick_font_size * 1.4) # 1.4 (some spacing)
-    height_in = height_pt / dpi
-    # compute the required figure height 
-    top_margin = 0.15 # in percentage of the figure height
-    bottom_margin = 0.05 # in percentage of the figure height
-    figure_height = height_in / (1 - top_margin - bottom_margin)
-    # set new height
-    if figure_height > init_height:
-        fig.set_figheight(figure_height)
-
-    # set plot title
-    plt.title(plot_title, fontsize=14)
-    # set axis titles
-    # plt.xlabel('classes')
-    plt.xlabel(x_label, fontsize='large')
-    # adjust size of window
-    fig.tight_layout()
-    # save the plot
-    fig.savefig(output_path)
-    # show image
-    if to_show:
-        plt.show()
-    # close the plot
-    plt.close()
-
-"""
  Create a ".temp_files/" and "results/" directory
 """
 tempdir = tempfile.TemporaryDirectory(prefix="map")
@@ -294,15 +173,13 @@ if os.path.exists(results_files_path): # if it exist already
     shutil.rmtree(results_files_path)
 
 os.makedirs(results_files_path)
-if draw_plot:
-    os.makedirs(os.path.join(results_files_path, "classes"))
 
 """
  ground-truth
      Load each of the ground-truth files into a temporary ".json" file.
      Create a list of all the class names present in the ground-truth (gt_classes).
 """
-# dictionary with counter per class
+
 gt_counter_per_class = collections.defaultdict(int)
 counter_images_per_class = collections.defaultdict(int)
 
@@ -513,36 +390,6 @@ with open(results_files_path + "/results.txt", 'w') as results_file:
         lamr, mr, fppi = log_average_miss_rate(np.array(rec), np.array(fp), n_images)
         lamr_dictionary[class_name] = lamr
 
-        """
-         Draw plot
-        """
-        if draw_plot:
-            plt.plot(rec, prec, '-o')
-            # add a new penultimate point to the list (mrec[-2], 0.0)
-            # since the last line segment (and respective area) do not affect the AP value
-            area_under_curve_x = mrec[:-1] + [mrec[-2]] + [mrec[-1]]
-            area_under_curve_y = mprec[:-1] + [0.0] + [mprec[-1]]
-            plt.fill_between(area_under_curve_x, 0, area_under_curve_y, alpha=0.2, edgecolor='r')
-            # set window title
-            fig = plt.gcf() # gcf - get current figure
-            fig.canvas.set_window_title('AP ' + class_name)
-            # set plot title
-            plt.title('class: ' + text)
-            #plt.suptitle('This is a somewhat long figure title', fontsize=16)
-            # set axis titles
-            plt.xlabel('Recall')
-            plt.ylabel('Precision')
-            # optional - set axes
-            axes = plt.gca() # gca - get current axes
-            axes.set_xlim([0.0,1.0])
-            axes.set_ylim([0.0,1.05]) # .05 to give some extra space
-            # Alternative option -> wait for button to be pressed
-            #while not plt.waitforbuttonpress(): pass # wait for key display
-            # Alternative option -> normal display
-            #plt.show()
-            # save the plot
-            fig.savefig(results_files_path + "/classes/" + class_name + ".png")
-            plt.cla() # clear axes for next plot
 
     results_file.write("\n# mAP of all classes\n")
     mAP = sum_AP / n_classes
@@ -605,46 +452,3 @@ with open(results_files_path + "/results.txt", 'a') as results_file:
         text += ", fp:" + str(n_det - count_true_positives[class_name]) + ")\n"
         results_file.write(text)
 
-"""
- Draw log-average miss rate plot (Show lamr of all classes in decreasing order)
-"""
-if draw_plot:
-    window_title = "lamr"
-    plot_title = "log-average miss rate"
-    x_label = "log-average miss rate"
-    output_path = results_files_path + "/lamr.png"
-    to_show = False
-    plot_color = 'royalblue'
-    draw_plot_func(
-        lamr_dictionary,
-        n_classes,
-        window_title,
-        plot_title,
-        x_label,
-        output_path,
-        to_show,
-        plot_color,
-        ""
-        )
-
-"""
- Draw mAP plot (Show AP's of all classes in decreasing order)
-"""
-if draw_plot:
-    window_title = "mAP"
-    plot_title = "mAP = {0:.2f}%".format(mAP*100)
-    x_label = "Average Precision"
-    output_path = results_files_path + "/mAP.png"
-    to_show = True
-    plot_color = 'royalblue'
-    draw_plot_func(
-        ap_dictionary,
-        n_classes,
-        window_title,
-        plot_title,
-        x_label,
-        output_path,
-        to_show,
-        plot_color,
-        ""
-        )
