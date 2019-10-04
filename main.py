@@ -1,15 +1,14 @@
-import jsonlines
-import numpy as np
-import glob
+import argparse
+import collections
 import json
+import math
+import operator
 import os
 import shutil
-import operator
 import sys
-import argparse
-import math
 import tempfile
 
+import jsonlines
 import numpy as np
 
 MINOVERLAP = 0.5 # default value (defined in the PASCAL VOC2012 challenge)
@@ -18,7 +17,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('-o', '--output-dir', required=False, default="/tmp", help="dir to output files")
 parser.add_argument('-gt', '--ground-truth', required=True, help="dir to ground truth annotations")
 parser.add_argument('-r', '--results', required=True, help="dir to resulting annotations")
-parser.add_argument('-na', '--no-animation', help="no animation is shown.", action="store_true")
+parser.add_argument('-na', '--no-animation',  default=True, help="no animation is shown.", action="store_true")
 parser.add_argument('-p', '--plot', help="plot is shown.", action="store_true")
 parser.add_argument('-q', '--quiet', help="minimalistic console output.", action="store_true")
 parser.add_argument('-v', '--verbose', help="maximalistic console output.", action="store_true")
@@ -40,7 +39,6 @@ args = parser.parse_args()
                 (Right,Bottom)
 '''
 
-# if there are no classes to ignore then replace None by empty list
 if args.ignore is None:
     args.ignore = []
 
@@ -53,26 +51,6 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 GT_PATH = os.path.join(args.ground_truth)
 DR_PATH = os.path.join(args.results)
-
-# if there are no images then no animation can be shown
-IMG_PATH = os.path.join(os.getcwd(), 'input', 'images-optional')
-if os.path.exists(IMG_PATH): 
-    for dirpath, dirnames, files in os.walk(IMG_PATH):
-        if not files:
-            # no image files found
-            args.no_animation = True
-else:
-    args.no_animation = True
-
-# try to import OpenCV if the user didn't choose the option --no-animation
-show_animation = False
-if not args.no_animation:
-    try:
-        import cv2
-        show_animation = True
-    except ImportError:
-        print("\"opencv-python\" not found, please install to visualize the results.")
-        args.no_animation = True
 
 # try to import Matplotlib if the user didn't choose the option --no-plot
 draw_plot = False
@@ -202,34 +180,6 @@ def voc_ap(rec, prec):
 
 
 """
- Convert the lines of a file to a list
-"""
-def file_lines_to_list(path):
-    # open txt file lines to a list
-    with open(path) as f:
-        content = f.readlines()
-    # remove whitespace characters like `\n` at the end of each line
-    content = [x.strip() for x in content]
-    return content
-
-"""
- Draws text in image
-"""
-def draw_text_in_image(img, text, pos, color, line_width):
-    font = cv2.FONT_HERSHEY_PLAIN
-    fontScale = 1
-    lineType = 1
-    bottomLeftCornerOfText = pos
-    cv2.putText(img, text,
-            bottomLeftCornerOfText,
-            font,
-            fontScale,
-            color,
-            lineType)
-    text_width, _ = cv2.getTextSize(text, font, fontScale, lineType)[0]
-    return img, (line_width + text_width)
-
-"""
  Plot - adjust axes
 """
 def adjust_axes(r, t, fig, axes):
@@ -350,8 +300,6 @@ if os.path.exists(results_files_path): # if it exist already
 os.makedirs(results_files_path)
 if draw_plot:
     os.makedirs(os.path.join(results_files_path, "classes"))
-if show_animation:
-    os.makedirs(os.path.join(results_files_path, "images", "detections_one_by_one"))
 
 """
  ground-truth
@@ -359,8 +307,8 @@ if show_animation:
      Create a list of all the class names present in the ground-truth (gt_classes).
 """
 # dictionary with counter per class
-gt_counter_per_class = {}
-counter_images_per_class = {}
+gt_counter_per_class = collections.defaultdict(int)
+counter_images_per_class = collections.defaultdict(int)
 
 with jsonlines.open(GT_PATH) as reader:
     for obj in reader:
@@ -373,28 +321,20 @@ with jsonlines.open(GT_PATH) as reader:
         boxes = obj["boxes"]
         for box in boxes:
             class_name = box["class"]
+            if class_name in args.ignore:
+                continue
             confidence = box["conf"]
             left = str(box["x1"])
             right = str(box["x2"])
             top = str(box["y1"])
             bottom = str(box["y2"])
-            if class_name in args.ignore:
-                continue
             bbox = left + " " + top + " " + right + " " +bottom
             bounding_boxes.append({"class_name":class_name, "bbox":bbox, "used":False, "confidence":confidence})
             # count that object
-            if class_name in gt_counter_per_class:
-                gt_counter_per_class[class_name] += 1
-            else:
-                # if class didn't exist yet
-                gt_counter_per_class[class_name] = 1
+            gt_counter_per_class[class_name] += 1
 
             if class_name not in already_seen_classes:
-                if class_name in counter_images_per_class:
-                    counter_images_per_class[class_name] += 1
-                else:
-                    # if class didn't exist yet
-                    counter_images_per_class[class_name] = 1
+                counter_images_per_class[class_name] += 1
                 already_seen_classes.append(class_name)
 
         file_id = f"{frame_no}"
@@ -487,28 +427,6 @@ with open(results_files_path + "/results.txt", 'w') as results_file:
         fp = [0] * nd
         for idx, detection in enumerate(dr_data):
             file_id = detection["file_id"]
-            if show_animation:
-                # find ground truth image
-                ground_truth_img = glob.glob1(IMG_PATH, file_id + ".*")
-                #tifCounter = len(glob.glob1(myPath,"*.tif"))
-                if len(ground_truth_img) == 0:
-                    error("Error. Image not found with id: " + file_id)
-                elif len(ground_truth_img) > 1:
-                    error("Error. Multiple image with id: " + file_id)
-                else: # found image
-                    #print(IMG_PATH + "/" + ground_truth_img[0])
-                    # Load image
-                    img = cv2.imread(IMG_PATH + "/" + ground_truth_img[0])
-                    # load image with draws of multiple detections
-                    img_cumulative_path = results_files_path + "/images/" + ground_truth_img[0]
-                    if os.path.isfile(img_cumulative_path):
-                        img_cumulative = cv2.imread(img_cumulative_path)
-                    else:
-                        img_cumulative = img.copy()
-                    # Add bottom border to image
-                    bottom_border = 60
-                    BLACK = [0, 0, 0]
-                    img = cv2.copyMakeBorder(img, 0, bottom_border, 0, 0, cv2.BORDER_CONSTANT, value=BLACK)
             # assign detection-results to ground truth object if any
             # open ground-truth with that file_id
             gt_file = tempdir.name + "/" + file_id + "_ground_truth.json"
@@ -533,9 +451,6 @@ with open(results_files_path + "/results.txt", 'w') as results_file:
                             ovmax = ov
                             gt_match = obj
 
-            # assign detection as true positive/don't care/false positive
-            if show_animation:
-                status = "NO MATCH FOUND!" # status is only used in the animation
             # set minimum overlap
             min_overlap = MINOVERLAP
             if specific_iou_flagged:
@@ -557,73 +472,15 @@ with open(results_files_path + "/results.txt", 'w') as results_file:
                             # update the ".json" file
                             with open(gt_file, 'w') as f:
                                     f.write(json.dumps(ground_truth_data))
-                            if show_animation:
-                                status = "MATCH!"
                         else:
                             # false positive (multiple detection)
                             fp[idx] = 1
-                            if show_animation:
-                                status = "REPEATED MATCH!"
             else:
                 # false positive
                 fp[idx] = 1
                 if ovmax > 0:
                     status = "INSUFFICIENT OVERLAP"
 
-            """
-             Draw image to show animation
-            """
-            if show_animation:
-                height, widht = img.shape[:2]
-                # colors (OpenCV works with BGR)
-                white = (255,255,255)
-                light_blue = (255,200,100)
-                green = (0,255,0)
-                light_red = (30,30,255)
-                # 1st line
-                margin = 10
-                v_pos = int(height - margin - (bottom_border / 2.0))
-                text = "Image: " + ground_truth_img[0] + " "
-                img, line_width = draw_text_in_image(img, text, (margin, v_pos), white, 0)
-                text = "Class [" + str(class_index) + "/" + str(n_classes) + "]: " + class_name + " "
-                img, line_width = draw_text_in_image(img, text, (margin + line_width, v_pos), light_blue, line_width)
-                if ovmax != -1:
-                    color = light_red
-                    if status == "INSUFFICIENT OVERLAP":
-                        text = "IoU: {0:.2f}% ".format(ovmax*100) + "< {0:.2f}% ".format(min_overlap*100)
-                    else:
-                        text = "IoU: {0:.2f}% ".format(ovmax*100) + ">= {0:.2f}% ".format(min_overlap*100)
-                        color = green
-                    img, _ = draw_text_in_image(img, text, (margin + line_width, v_pos), color, line_width)
-                # 2nd line
-                v_pos += int(bottom_border / 2.0)
-                rank_pos = str(idx+1) # rank position (idx starts at 0)
-                text = "Detection #rank: " + rank_pos + " confidence: {0:.2f}% ".format(float(detection["confidence"])*100)
-                img, line_width = draw_text_in_image(img, text, (margin, v_pos), white, 0)
-                color = light_red
-                if status == "MATCH!":
-                    color = green
-                text = "Result: " + status + " "
-                img, line_width = draw_text_in_image(img, text, (margin + line_width, v_pos), color, line_width)
-
-                font = cv2.FONT_HERSHEY_SIMPLEX
-                if ovmax > 0: # if there is intersections between the bounding-boxes
-                    bbgt = [ int(round(float(x))) for x in gt_match["bbox"].split() ]
-                    cv2.rectangle(img,(bbgt[0],bbgt[1]),(bbgt[2],bbgt[3]),light_blue,2)
-                    cv2.rectangle(img_cumulative,(bbgt[0],bbgt[1]),(bbgt[2],bbgt[3]),light_blue,2)
-                    cv2.putText(img_cumulative, class_name, (bbgt[0],bbgt[1] - 5), font, 0.6, light_blue, 1, cv2.LINE_AA)
-                bb = [int(i) for i in bb]
-                cv2.rectangle(img,(bb[0],bb[1]),(bb[2],bb[3]),color,2)
-                cv2.rectangle(img_cumulative,(bb[0],bb[1]),(bb[2],bb[3]),color,2)
-                cv2.putText(img_cumulative, class_name, (bb[0],bb[1] - 5), font, 0.6, color, 1, cv2.LINE_AA)
-                # show image
-                cv2.imshow("Animation", img)
-                cv2.waitKey(20) # show for 20 ms
-                # save image to results
-                output_img_path = results_files_path + "/images/detections_one_by_one/" + class_name + "_detection" + str(idx) + ".jpg"
-                cv2.imwrite(output_img_path, img)
-                # save the image with all the objects drawn to it
-                cv2.imwrite(img_cumulative_path, img_cumulative)
 
         #print(tp)
         # compute precision/recall
@@ -693,9 +550,6 @@ with open(results_files_path + "/results.txt", 'w') as results_file:
             fig.savefig(results_files_path + "/classes/" + class_name + ".png")
             plt.cla() # clear axes for next plot
 
-    if show_animation:
-        cv2.destroyAllWindows()
-
     results_file.write("\n# mAP of all classes\n")
     mAP = sum_AP / n_classes
     text = "mAP = {0:.2f}%".format(mAP*100)
@@ -709,11 +563,10 @@ tempdir.cleanup()
  Count total of detection-results
 """
 # iterate through all the files
-det_counter_per_class = {}
+det_counter_per_class = collections.defaultdict(int)
 with jsonlines.open(DR_PATH) as reader:
     for obj in reader:
         bounding_boxes = []
-        already_seen_classes = []
 
         # create ground-truth dictionary
         #class_name, left, top, right, bottom = line.split()
@@ -724,12 +577,7 @@ with jsonlines.open(DR_PATH) as reader:
             # check if class is in the ignore list, if yes skip
             if class_name in args.ignore:
                 continue
-            # count that object
-            if class_name in det_counter_per_class:
-                det_counter_per_class[class_name] += 1
-            else:
-                # if class didn't exist yet
-                det_counter_per_class[class_name] = 1
+            det_counter_per_class[class_name] += 1
 #print(det_counter_per_class)
 dr_classes = list(det_counter_per_class.keys())
 
