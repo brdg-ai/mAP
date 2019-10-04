@@ -5,7 +5,6 @@ import math
 import os
 import shutil
 import sys
-import tempfile
 
 import jsonlines
 import numpy as np
@@ -126,11 +125,11 @@ def voc_ap(rec, prec):
     i=find(mrec(2:end)~=mrec(1:end-1))+1;
     ap=sum((mrec(i)-mrec(i-1)).*mpre(i));
     """
-    rec.insert(0, 0.0) # insert 0.0 at begining of list
-    rec.append(1.0) # insert 1.0 at end of list
+    rec.insert(0, 0.0)
+    rec.append(1.0)
     mrec = rec[:]
-    prec.insert(0, 0.0) # insert 0.0 at begining of list
-    prec.append(0.0) # insert 0.0 at end of list
+    prec.insert(0, 0.0)
+    prec.append(0.0)
     mpre = prec[:]
     """
      This part makes the precision monotonically decreasing
@@ -164,24 +163,15 @@ def voc_ap(rec, prec):
 
 
 """
- Create a ".temp_files/" and "results/" directory
-"""
-tempdir = tempfile.TemporaryDirectory(prefix="map")
-results_files_path = os.path.join(args.output_dir, "results")
-if os.path.exists(results_files_path): # if it exist already
-    # reset the results directory
-    shutil.rmtree(results_files_path)
-
-os.makedirs(results_files_path)
-
-"""
  ground-truth
-     Load each of the ground-truth files into a temporary ".json" file.
      Create a list of all the class names present in the ground-truth (gt_classes).
 """
 
 gt_counter_per_class = collections.defaultdict(int)
 counter_images_per_class = collections.defaultdict(int)
+
+# Store the groundtruth in memory.  (Old was to write it out to json file)
+groundtruth = {}
 
 with jsonlines.open(GT_PATH) as reader:
     for obj in reader:
@@ -211,9 +201,8 @@ with jsonlines.open(GT_PATH) as reader:
                 already_seen_classes.append(class_name)
 
         file_id = f"{frame_no}"
-        # dump bounding_boxes into a ".json" file
-        with open(tempdir.name + "/" + file_id + "_ground_truth.json", 'w') as outfile:
-            json.dump(bounding_boxes, outfile)
+        groundtruth[file_id] = bounding_boxes
+ 
 
 gt_classes = list(gt_counter_per_class.keys())
 # let's sort the classes alphabetically
@@ -222,6 +211,7 @@ n_classes = len(gt_classes)
 #print(gt_classes)
 #print(gt_counter_per_class)
 
+dr_store = {}  # Used to be json
 """
  Check format of the flag --set-class-iou (if used)
     e.g. check if class exists
@@ -271,8 +261,7 @@ for class_index, class_name in enumerate(gt_classes):
                     bounding_boxes.append({"confidence":confidence, "file_id":file_id, "bbox":bbox})
     # sort detection-results by decreasing confidence
     bounding_boxes.sort(key=lambda x:float(x['confidence']), reverse=True)
-    with open(tempdir.name+ "/" + class_name + "_dr.json", 'w') as outfile:
-        json.dump(bounding_boxes, outfile)
+    dr_store[class_name] = bounding_boxes
 
 """
  Calculate the AP for each class
@@ -280,175 +269,106 @@ for class_index, class_name in enumerate(gt_classes):
 sum_AP = 0.0
 ap_dictionary = {}
 lamr_dictionary = {}
-# open file to store the results
-with open(results_files_path + "/results.txt", 'w') as results_file:
-    results_file.write("# AP and precision/recall per class\n")
-    count_true_positives = {}
-    for class_index, class_name in enumerate(gt_classes):
-        count_true_positives[class_name] = 0
-        """
-         Load detection-results of that class
-        """
-        dr_file = tempdir.name + "/" + class_name + "_dr.json"
-        dr_data = json.load(open(dr_file))
+count_true_positives = {}
+for class_index, class_name in enumerate(gt_classes):
+    count_true_positives[class_name] = 0
+    dr_data = dr_store[class_name] # Detection results
 
-        """
-         Assign detection-results to ground-truth objects
-        """
-        nd = len(dr_data)
-        tp = [0] * nd # creates an array of zeros of size nd
-        fp = [0] * nd
-        for idx, detection in enumerate(dr_data):
-            file_id = detection["file_id"]
-            # assign detection-results to ground truth object if any
-            # open ground-truth with that file_id
-            gt_file = tempdir.name + "/" + file_id + "_ground_truth.json"
-            ground_truth_data = json.load(open(gt_file))
-            ovmax = -1
-            gt_match = -1
-            # load detected object bounding-box
-            bb = [ float(x) for x in detection["bbox"].split() ]
-            for obj in ground_truth_data:
-                # look for a class_name match
-                if obj["class_name"] == class_name:
-                    bbgt = [ float(x) for x in obj["bbox"].split() ]
-                    bi = [max(bb[0],bbgt[0]), max(bb[1],bbgt[1]), min(bb[2],bbgt[2]), min(bb[3],bbgt[3])]
-                    iw = bi[2] - bi[0] + 1
-                    ih = bi[3] - bi[1] + 1
-                    if iw > 0 and ih > 0:
-                        # compute overlap (IoU) = area of intersection / area of union
-                        ua = (bb[2] - bb[0] + 1) * (bb[3] - bb[1] + 1) + (bbgt[2] - bbgt[0]
-                                        + 1) * (bbgt[3] - bbgt[1] + 1) - iw * ih
-                        ov = iw * ih / ua
-                        if ov > ovmax:
-                            ovmax = ov
-                            gt_match = obj
+    """
+        Assign detection-results to ground-truth objects
+    """
+    nd = len(dr_data)
+    tp = [0] * nd # creates an array of zeros of size nd
+    fp = [0] * nd
+    for idx, detection in enumerate(dr_data):
+        file_id = detection["file_id"]
+        # assign detection-results to ground truth object if any
+        # open ground-truth with that file_id
+        ground_truth_data = groundtruth[file_id]
+        ovmax = -1
+        gt_match = -1
+        # load detected object bounding-box
+        bb = [ float(x) for x in detection["bbox"].split() ]
+        for obj in ground_truth_data:
+            # look for a class_name match
+            if obj["class_name"] == class_name:
+                bbgt = [ float(x) for x in obj["bbox"].split() ]
+                bi = [max(bb[0],bbgt[0]), max(bb[1],bbgt[1]), min(bb[2],bbgt[2]), min(bb[3],bbgt[3])]
+                iw = bi[2] - bi[0] + 1
+                ih = bi[3] - bi[1] + 1
+                if iw > 0 and ih > 0:
+                    # compute overlap (IoU) = area of intersection / area of union
+                    ua = (bb[2] - bb[0] + 1) * (bb[3] - bb[1] + 1) + (bbgt[2] - bbgt[0]
+                                    + 1) * (bbgt[3] - bbgt[1] + 1) - iw * ih
+                    ov = iw * ih / ua
+                    if ov > ovmax:
+                        ovmax = ov
+                        gt_match = obj
 
-            # set minimum overlap
-            min_overlap = MINOVERLAP
-            if specific_iou_flagged:
-                if class_name in specific_iou_classes:
-                    index = specific_iou_classes.index(class_name)
-                    min_overlap = float(iou_list[index])
-            if ovmax >= min_overlap:
-                if "difficult" not in gt_match:
-                        if not bool(gt_match["used"]):
-                            result_conf = detection["confidence"]
-                            gt_conf = gt_match["confidence"]
-                            if args.verbose:
-                                print(f"conf_diff {gt_conf} {result_conf} {gt_conf - result_conf}")
+        # set minimum overlap
+        min_overlap = MINOVERLAP
+        if specific_iou_flagged:
+            if class_name in specific_iou_classes:
+                index = specific_iou_classes.index(class_name)
+                min_overlap = float(iou_list[index])
+        if ovmax >= min_overlap:
+            if "difficult" not in gt_match:
+                    if not bool(gt_match["used"]):
+                        result_conf = detection["confidence"]
+                        gt_conf = gt_match["confidence"]
+                        if args.verbose:
+                            print(f"conf_diff {gt_conf} {result_conf} {gt_conf - result_conf}")
 
-                            # true positive
-                            tp[idx] = 1
-                            gt_match["used"] = True
-                            count_true_positives[class_name] += 1
-                            # update the ".json" file
-                            with open(gt_file, 'w') as f:
-                                    f.write(json.dumps(ground_truth_data))
-                        else:
-                            # false positive (multiple detection)
-                            fp[idx] = 1
-            else:
-                # false positive
-                fp[idx] = 1
+                        # true positive
+                        tp[idx] = 1
+                        gt_match["used"] = True
+                        count_true_positives[class_name] += 1
+                        groundtruth[file_id] = ground_truth_data
+                    else:
+                        # false positive (multiple detection)
+                        fp[idx] = 1
+        else:
+            # false positive
+            fp[idx] = 1
 
 
-        #print(tp)
-        # compute precision/recall
-        cumsum = 0
-        for idx, val in enumerate(fp):
-            fp[idx] += cumsum
-            cumsum += val
-        cumsum = 0
-        for idx, val in enumerate(tp):
-            tp[idx] += cumsum
-            cumsum += val
-        #print(tp)
-        rec = tp[:]
-        for idx, val in enumerate(tp):
-            rec[idx] = float(tp[idx]) / gt_counter_per_class[class_name]
-        #print(rec)
-        prec = tp[:]
-        for idx, val in enumerate(tp):
-            prec[idx] = float(tp[idx]) / (fp[idx] + tp[idx])
-        #print(prec)
+    #print(tp)
+    # compute precision/recall
+    cumsum = 0
+    for idx, val in enumerate(fp):
+        fp[idx] += cumsum
+        cumsum += val
+    cumsum = 0
+    for idx, val in enumerate(tp):
+        tp[idx] += cumsum
+        cumsum += val
+    #print(tp)
+    rec = tp[:]
+    for idx, val in enumerate(tp):
+        rec[idx] = float(tp[idx]) / gt_counter_per_class[class_name]
+    #print(rec)
+    prec = tp[:]
+    for idx, val in enumerate(tp):
+        prec[idx] = float(tp[idx]) / (fp[idx] + tp[idx])
+    #print(prec)
 
-        ap, mrec, mprec = voc_ap(rec[:], prec[:])
-        sum_AP += ap
-        text = "{0:.2f}%".format(ap*100) + " = " + class_name + " AP " #class_name + " AP = {0:.2f}%".format(ap*100)
-        """
-         Write to results.txt
-        """
-        rounded_prec = [ '%.2f' % elem for elem in prec ]
-        rounded_rec = [ '%.2f' % elem for elem in rec ]
-        results_file.write(text + "\n Precision: " + str(rounded_prec) + "\n Recall :" + str(rounded_rec) + "\n\n")
-        if not args.quiet:
-            print(text)
-        ap_dictionary[class_name] = ap
+    ap, mrec, mprec = voc_ap(rec[:], prec[:])
+    sum_AP += ap
+    text = "{0:.2f}%".format(ap*100) + " = " + class_name + " AP " #class_name + " AP = {0:.2f}%".format(ap*100)
+    """
+        Write to results.txt
+    """
+    rounded_prec = [ '%.2f' % elem for elem in prec ]
+    rounded_rec = [ '%.2f' % elem for elem in rec ]
+    if not args.quiet:
+        print(text)
+    ap_dictionary[class_name] = ap
 
-        n_images = counter_images_per_class[class_name]
-        lamr, mr, fppi = log_average_miss_rate(np.array(rec), np.array(fp), n_images)
-        lamr_dictionary[class_name] = lamr
-
-
-    results_file.write("\n# mAP of all classes\n")
-    mAP = sum_AP / n_classes
-    text = "mAP = {0:.2f}%".format(mAP*100)
-    results_file.write(text + "\n")
-    print(text)
-
-# remove the temp_files directory
-tempdir.cleanup()
-
-"""
- Count total of detection-results
-"""
-# iterate through all the files
-det_counter_per_class = collections.defaultdict(int)
-with jsonlines.open(DR_PATH) as reader:
-    for obj in reader:
-        bounding_boxes = []
-
-        # create ground-truth dictionary
-        #class_name, left, top, right, bottom = line.split()
-        frame_no = obj["frame_no"]
-        boxes = obj["boxes"]
-        for box in boxes:
-            class_name = box["class"]
-            # check if class is in the ignore list, if yes skip
-            if class_name in args.ignore:
-                continue
-            det_counter_per_class[class_name] += 1
-#print(det_counter_per_class)
-dr_classes = list(det_counter_per_class.keys())
+    n_images = counter_images_per_class[class_name]
+    lamr, mr, fppi = log_average_miss_rate(np.array(rec), np.array(fp), n_images)
+    lamr_dictionary[class_name] = lamr
 
 
-"""
- Write number of ground-truth objects per class to results.txt
-"""
-with open(results_files_path + "/results.txt", 'a') as results_file:
-    results_file.write("\n# Number of ground-truth objects per class\n")
-    for class_name in sorted(gt_counter_per_class):
-        results_file.write(class_name + ": " + str(gt_counter_per_class[class_name]) + "\n")
-
-"""
- Finish counting true positives
-"""
-for class_name in dr_classes:
-    # if class exists in detection-result but not in ground-truth then there are no true positives in that class
-    if class_name not in gt_classes:
-        count_true_positives[class_name] = 0
-#print(count_true_positives)
-
-"""
- Write number of detected objects per class to results.txt
-"""
-with open(results_files_path + "/results.txt", 'a') as results_file:
-    results_file.write("\n# Number of detected objects per class\n")
-    for class_name in sorted(dr_classes):
-        n_det = det_counter_per_class[class_name]
-        text = class_name + ": " + str(n_det)
-        text += " (tp:" + str(count_true_positives[class_name]) + ""
-        text += ", fp:" + str(n_det - count_true_positives[class_name]) + ")\n"
-        results_file.write(text)
-
+mAP = sum_AP / n_classes
+text = "mAP = {0:.2f}%".format(mAP*100)
+print(text)
