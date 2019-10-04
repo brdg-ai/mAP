@@ -21,7 +21,6 @@ parser.add_argument('-na', '--no-animation',  default=True, help="no animation i
 parser.add_argument('-p', '--plot', help="plot is shown.", action="store_true")
 parser.add_argument('-q', '--quiet', help="minimalistic console output.", action="store_true")
 parser.add_argument('-v', '--verbose', help="maximalistic console output.", action="store_true")
-# argparse receiving list of classes to be ignored
 parser.add_argument('-i', '--ignore', nargs='+', type=str, help="ignore a list of classes.")
 # argparse receiving list of classes with specific IoU (e.g., python main.py --set-class-iou person 0.7)
 parser.add_argument('--set-class-iou', nargs='+', type=str, help="set IoU for a specific class.")
@@ -45,9 +44,6 @@ if args.ignore is None:
 specific_iou_flagged = False
 if args.set_class_iou is not None:
     specific_iou_flagged = True
-
-# make sure that the cwd() is the location of the python script (so that every path makes sense)
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 GT_PATH = os.path.join(args.ground_truth)
 DR_PATH = os.path.join(args.results)
@@ -478,8 +474,6 @@ with open(results_files_path + "/results.txt", 'w') as results_file:
             else:
                 # false positive
                 fp[idx] = 1
-                if ovmax > 0:
-                    status = "INSUFFICIENT OVERLAP"
 
 
         #print(tp)
