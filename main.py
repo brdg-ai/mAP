@@ -181,16 +181,15 @@ with jsonlines.open(GT_PATH) as reader:
         # create ground-truth dictionary
         #class_name, left, top, right, bottom = line.split()
         frame_no = obj["frame_no"]
-        boxes = obj["boxes"]
-        for box in boxes:
+        for box in obj["boxes"]:
             class_name = box["class"]
             if class_name in args.ignore:
                 continue
             confidence = box["conf"]
-            left = float(box["x1"])
-            right = float(box["x2"])
-            top = float(box["y1"])
-            bottom = float(box["y2"])
+            left = box["x1"]
+            right = box["x2"]
+            top = box["y1"]
+            bottom = box["y2"]
             # thebox list is left, top, right, bottom
             thebox = (left, top, right, bottom)
             bounding_boxes.append({"class_name":class_name, "bbox": thebox, "used":False, "confidence":confidence})
@@ -201,8 +200,7 @@ with jsonlines.open(GT_PATH) as reader:
                 counter_images_per_class[class_name] += 1
                 already_seen_classes.append(class_name)
 
-        file_id = f"{frame_no}"
-        groundtruth[file_id] = bounding_boxes
+        groundtruth[frame_no] = bounding_boxes
  
 
 gt_classes = list(gt_counter_per_class.keys())
@@ -239,26 +237,23 @@ if specific_iou_flagged:
 
 """
  detection-results
-     Load each of the detection-results files into a temporary ".json" file.
 """
 # get a list with the detection-results files
-
 for class_index, class_name in enumerate(gt_classes):
     bounding_boxes = []
     with jsonlines.open(DR_PATH) as reader:
         for obj in reader:
             boxes = obj["boxes"]
             frame_no = obj["frame_no"]
-            file_id = f"{frame_no}"
             for box in boxes:
                 tmp_class_name = box["class"]
                 confidence = box["conf"]
-                left = float(box["x1"])
-                right = float(box["x2"])
-                top = float(box["y1"])
-                bottom = float(box["y2"])
+                left = box["x1"]
+                right = box["x2"]
+                top = box["y1"]
+                bottom = box["y2"]
                 if tmp_class_name == class_name:
-                    bounding_boxes.append({"confidence":confidence, "file_id":file_id, "bbox": [left, top, right, bottom]})
+                    bounding_boxes.append({"confidence":confidence, "frame_no":frame_no, "bbox": [left, top, right, bottom]})
     # sort detection-results by decreasing confidence
     bounding_boxes.sort(key=lambda x:float(x['confidence']), reverse=True)
     dr_store[class_name] = bounding_boxes
@@ -281,10 +276,10 @@ for class_index, class_name in enumerate(gt_classes):
     tp = [0] * nd # creates an array of zeros of size nd
     fp = [0] * nd
     for idx, detection in enumerate(dr_data):
-        file_id = detection["file_id"]
+        frame_no = detection["frame_no"]
         # assign detection-results to ground truth object if any
-        # open ground-truth with that file_id
-        ground_truth_data = groundtruth[file_id]
+        # open ground-truth with that frame_no
+        ground_truth_data = groundtruth[frame_no]
         ovmax = -1
         gt_match = -1
         # load detected object bounding-box
@@ -323,7 +318,7 @@ for class_index, class_name in enumerate(gt_classes):
                         tp[idx] = 1
                         gt_match["used"] = True
                         count_true_positives[class_name] += 1
-                        groundtruth[file_id] = ground_truth_data
+                        groundtruth[frame_no] = ground_truth_data
                     else:
                         # false positive (multiple detection)
                         fp[idx] = 1
@@ -346,11 +341,11 @@ for class_index, class_name in enumerate(gt_classes):
     rec = tp[:]
     for idx, val in enumerate(tp):
         rec[idx] = float(tp[idx]) / gt_counter_per_class[class_name]
-    #print(rec)
+    #print("Recall: ", rec)
     prec = tp[:]
     for idx, val in enumerate(tp):
         prec[idx] = float(tp[idx]) / (fp[idx] + tp[idx])
-    #print(prec)
+    #print("Precision: ", prec)
 
     ap, mrec, mprec = voc_ap(rec[:], prec[:])
     sum_AP += ap
