@@ -187,12 +187,13 @@ with jsonlines.open(GT_PATH) as reader:
             if class_name in args.ignore:
                 continue
             confidence = box["conf"]
-            left = str(box["x1"])
-            right = str(box["x2"])
-            top = str(box["y1"])
-            bottom = str(box["y2"])
-            bbox = left + " " + top + " " + right + " " +bottom
-            bounding_boxes.append({"class_name":class_name, "bbox":bbox, "used":False, "confidence":confidence})
+            left = float(box["x1"])
+            right = float(box["x2"])
+            top = float(box["y1"])
+            bottom = float(box["y2"])
+            # thebox list is left, top, right, bottom
+            thebox = (left, top, right, bottom)
+            bounding_boxes.append({"class_name":class_name, "bbox": thebox, "used":False, "confidence":confidence})
             # count that object
             gt_counter_per_class[class_name] += 1
 
@@ -252,13 +253,12 @@ for class_index, class_name in enumerate(gt_classes):
             for box in boxes:
                 tmp_class_name = box["class"]
                 confidence = box["conf"]
-                left = str(box["x1"])
-                right = str(box["x2"])
-                top = str(box["y1"])
-                bottom = str(box["y2"])
+                left = float(box["x1"])
+                right = float(box["x2"])
+                top = float(box["y1"])
+                bottom = float(box["y2"])
                 if tmp_class_name == class_name:
-                    bbox = left + " " + top + " " + right + " " +bottom
-                    bounding_boxes.append({"confidence":confidence, "file_id":file_id, "bbox":bbox})
+                    bounding_boxes.append({"confidence":confidence, "file_id":file_id, "bbox": [left, top, right, bottom]})
     # sort detection-results by decreasing confidence
     bounding_boxes.sort(key=lambda x:float(x['confidence']), reverse=True)
     dr_store[class_name] = bounding_boxes
@@ -288,11 +288,11 @@ for class_index, class_name in enumerate(gt_classes):
         ovmax = -1
         gt_match = -1
         # load detected object bounding-box
-        bb = [ float(x) for x in detection["bbox"].split() ]
+        bb = detection["bbox"]
         for obj in ground_truth_data:
             # look for a class_name match
             if obj["class_name"] == class_name:
-                bbgt = [ float(x) for x in obj["bbox"].split() ]
+                bbgt = obj["bbox"]
                 bi = [max(bb[0],bbgt[0]), max(bb[1],bbgt[1]), min(bb[2],bbgt[2]), min(bb[3],bbgt[3])]
                 iw = bi[2] - bi[0] + 1
                 ih = bi[3] - bi[1] + 1
