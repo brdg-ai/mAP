@@ -1,13 +1,8 @@
 import argparse
 import collections
-import json
-import math
-import os
-import shutil
 import sys
 
 import jsonlines
-import numpy as np
 
 MINOVERLAP = 0.5 # default value (defined in the PASCAL VOC2012 challenge)
 
@@ -43,9 +38,8 @@ specific_iou_flagged = False
 if args.set_class_iou is not None:
     specific_iou_flagged = True
 
-GT_PATH = os.path.join(args.ground_truth)
-DR_PATH = os.path.join(args.results)
-
+GT_PATH = args.ground_truth
+DR_PATH = args.results
 
 """
  throw error and exit
@@ -162,9 +156,7 @@ with jsonlines.open(GT_PATH) as reader:
         groundtruth[frame_no] = bounding_boxes
  
 
-gt_classes = list(gt_counter_per_class.keys())
-# sort the classes alphabetically
-gt_classes = sorted(gt_classes)
+gt_classes = sorted(gt_counter_per_class.keys())
 n_classes = len(gt_classes)
 
 dr_store = {}  # Used to be json
@@ -304,5 +296,4 @@ for class_index, class_name in enumerate(gt_classes):
 
 
 mAP = sum_AP / n_classes
-text = "mAP = {0:.2f}%".format(mAP*100)
-print(text)
+print("mAP = {0:.2f}%".format(mAP*100))
